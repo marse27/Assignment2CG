@@ -100,6 +100,8 @@ public:
             ImGui::Checkbox("Use material if no texture", &m_useMaterial);
             ImGui::Checkbox("Show path", &m_showPath);
             ImGui::SliderFloat("Path speed", &m_pathSpeed, 0.0f, 0.3f, "%.3f");
+            ImGui::Checkbox("Chase camera", &m_chaseCam);
+            ImGui::SliderFloat("Probe scale", &m_probeScale, 0.02f, 0.6f, "%.3f");
             ImGui::End();
 
             glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
@@ -124,6 +126,12 @@ public:
             if (std::abs(glm::dot(up, fwd)) > 0.98f) up = glm::vec3(0,0,1); // avoid near-parallel
             glm::vec3 right = glm::normalize(glm::cross(fwd, up));
             up = glm::normalize(glm::cross(right, fwd));
+
+            // simple chase camera (back and a bit above)
+            glm::vec3 camTarget = probePos;
+            glm::vec3 camPos    = probePos - fwd * 2.0f + up * 0.6f;
+            m_viewMatrix = glm::lookAt(camPos, camTarget, up);
+
             glm::mat4 R = glm::mat4(
                 glm::vec4(right, 0),
                 glm::vec4(up,    0),
@@ -135,7 +143,10 @@ public:
                 R *
                 glm::scale(glm::mat4(1.0f), glm::vec3(m_probeScale));
 
+
+
             // draw the probe (reuse first mesh as placeholder)
+            // draw the moving probe using the first mesh as placeholder
             if (!m_meshes.empty()) {
                 m_defaultShader.bind();
                 glm::mat4 mvpProbe = m_projectionMatrix * m_viewMatrix * Mprobe;
@@ -167,14 +178,16 @@ public:
             }
 
             // draw the spline once
+            // draw the spline once (avoid z-fighting)
             if (m_showPath) {
-                glDisable(GL_DEPTH_TEST); // avoid z-fighting with scene
+                glDisable(GL_DEPTH_TEST);
                 m_defaultShader.bind();
-                glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * glm::mat4(1.0f);
-                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
+                glm::mat4 mvpSpline = m_projectionMatrix * m_viewMatrix * glm::mat4(1.0f);
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvpSpline));
                 m_path.drawGL();
                 glEnable(GL_DEPTH_TEST);
             }
+
             m_window.swapBuffers();
 
         }
@@ -230,7 +243,9 @@ public:
         float m_pathSpeed  = 0.05f;
         GLuint m_basicLineProgram = 0;
 
-        float m_probeScale = 0.1f;
+        float m_probeScale = 0.12f;
+        bool  m_chaseCam   = true;    // toggle chase camera
+
 
     };
 
