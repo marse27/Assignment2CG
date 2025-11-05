@@ -22,6 +22,7 @@ DISABLE_WARNINGS_POP()
 #include <iostream>
 #include <vector>
 #include <memory>
+#include "scene_node.h"
 
 class Application {
 public:
@@ -86,6 +87,12 @@ public:
             }
             m_path.setSegments(segs);
         }
+
+        // Build probe hierarchy: root -> antenna base -> antenna tip
+        m_probeRoot = new SceneNode(); // local set per-frame from Mprobe
+        m_probeAntennaBase = m_probeRoot->addChild(new SceneNode());
+        m_probeAntennaTip  = m_probeAntennaBase->addChild(new SceneNode());
+
     }
 
     void update()
@@ -120,42 +127,62 @@ public:
             glm::vec3 probePos = m_path.sample(m_pathU);
             glm::vec3 probeDir = glm::normalize(m_path.tangentAt(m_pathU));
 
-            // Build a probe model matrix at probePos, roughly aligned with tangent
+            // Build a frame from tangent
             glm::vec3 fwd = glm::normalize(probeDir);
-            glm::vec3 up  = glm::vec3(0,1,0);
-            if (std::abs(glm::dot(up, fwd)) > 0.98f) up = glm::vec3(0,0,1); // avoid near-parallel
+            glm::vec3 up  = glm::vec3(0, 1, 0);
+            if (std::abs(glm::dot(up, fwd)) > 0.98f) up = glm::vec3(0,0,1);
             glm::vec3 right = glm::normalize(glm::cross(fwd, up));
             up = glm::normalize(glm::cross(right, fwd));
-
-            // simple chase camera (back and a bit above)
-            glm::vec3 camTarget = probePos;
-            glm::vec3 camPos    = probePos - fwd * 2.0f + up * 0.6f;
-            m_viewMatrix = glm::lookAt(camPos, camTarget, up);
-
             glm::mat4 R = glm::mat4(
                 glm::vec4(right, 0),
                 glm::vec4(up,    0),
-                glm::vec4(-fwd,  0),  // -fwd for look-at style
+                glm::vec4(-fwd,  0),
                 glm::vec4(0,0,0,1)
             );
+
+            // Root at path position, scaled
             glm::mat4 Mprobe =
                 glm::translate(glm::mat4(1.0f), probePos) *
                 R *
                 glm::scale(glm::mat4(1.0f), glm::vec3(m_probeScale));
+            m_probeRoot->local = Mprobe;
 
+            // Animate antenna base: spin around its own Y and offset above the body
+            float tSec = (float)glfwGetTime();
+            glm::mat4 MantennaBase =
+                glm::translate(glm::mat4(1.0f), glm::vec3(0, 2.0f, 0)) *   // lift above body a bit
+                glm::rotate(glm::mat4(1.0f), tSec * 3.0f, glm::vec3(0,1,0)) *
+                glm::scale(glm::mat4(1.0f), glm::vec3(0.4f, 0.4f, 0.4f));
+            m_probeAntennaBase->local = MantennaBase;
 
+            // Antenna tip: bob up/down and rotate
+            float bob = 0.25f * std::sin(tSec * 4.0f);
+            glm::mat4 MantennaTip =
+                glm::translate(glm::mat4(1.0f), glm::vec3(0, 1.0f + bob, 0)) *
+                glm::rotate(glm::mat4(1.0f), -tSec * 6.0f, glm::vec3(0,0,1)) *
+                glm::scale(glm::mat4(1.0f), glm::vec3(0.25f, 0.25f, 0.25f));
+            m_probeAntennaTip->local = MantennaTip;
 
-            // draw the probe (reuse first mesh as placeholder)
-            // draw the moving probe using the first mesh as placeholder
+            // Optional chase camera
+            if (m_chaseCam) {
+                glm::vec3 camTarget = probePos;
+                glm::vec3 camPos    = probePos - fwd * 2.0f + up * 0.6f;
+                m_viewMatrix = glm::lookAt(camPos, camTarget, up);
+            }
+
+            m_probeRoot->update();   // propagate world = parent * local
+
             if (!m_meshes.empty()) {
-                m_defaultShader.bind();
-                glm::mat4 mvpProbe = m_projectionMatrix * m_viewMatrix * Mprobe;
-                glm::mat3 nProbe   = glm::inverseTranspose(glm::mat3(Mprobe));
-                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvpProbe));
-                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nProbe));
-                glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), GL_FALSE);
-                glUniform1i(m_defaultShader.getUniformLocation("useMaterial"), GL_TRUE);
-                m_meshes.front().draw(m_defaultShader);
+                m_probeRoot->traverse([&](const glm::mat4& M) {
+                    m_defaultShader.bind();
+                    glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
+                    glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
+                    glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
+                    glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
+                    glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), GL_FALSE);
+                    glUniform1i(m_defaultShader.getUniformLocation("useMaterial"), GL_TRUE);
+                    m_meshes.front().draw(m_defaultShader);
+                });
             }
 
 
@@ -177,6 +204,8 @@ public:
                 mesh.draw(m_defaultShader);
             }
 
+
+
             // draw the spline once
             // draw the spline once (avoid z-fighting)
             if (m_showPath) {
@@ -187,6 +216,7 @@ public:
                 m_path.drawGL();
                 glEnable(GL_DEPTH_TEST);
             }
+
 
             m_window.swapBuffers();
 
@@ -242,6 +272,11 @@ public:
         float m_pathU      = 0.0f;
         float m_pathSpeed  = 0.05f;
         GLuint m_basicLineProgram = 0;
+
+        // Probe hierarchy
+        SceneNode* m_probeRoot = nullptr;
+        SceneNode* m_probeAntennaBase = nullptr;
+        SceneNode* m_probeAntennaTip  = nullptr;
 
         float m_probeScale = 0.12f;
         bool  m_chaseCam   = true;    // toggle chase camera
