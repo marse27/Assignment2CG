@@ -23,6 +23,8 @@ DISABLE_WARNINGS_POP()
 #include <vector>
 #include <memory>
 #include "scene_node.h"
+#include "skybox.h"
+
 
 class Application {
 public:
@@ -72,6 +74,24 @@ public:
             std::cerr << e.what() << std::endl;
         }
 
+        // build skybox shader
+        ShaderBuilder skyB;
+        skyB.addStage(GL_VERTEX_SHADER,   RESOURCE_ROOT "shaders/skybox_vert.glsl");
+        skyB.addStage(GL_FRAGMENT_SHADER, RESOURCE_ROOT "shaders/skybox_frag.glsl");
+        m_skyShader = skyB.build();
+
+        // load cubemap faces
+        std::array<std::string,6> faces = {
+            RESOURCE_ROOT "resources/sky/mid right.png",
+            RESOURCE_ROOT "resources/sky/left.png",
+            RESOURCE_ROOT "resources/sky/top.png",
+            RESOURCE_ROOT "resources/sky/down.png",
+            RESOURCE_ROOT "resources/sky/mid.png",
+            RESOURCE_ROOT "resources/sky/right.png"
+        };
+        m_sky = std::make_unique<Skybox>(faces);
+
+
         // Build the Bezier path segments
         {
             std::vector<CubicBezier> segs;
@@ -109,6 +129,7 @@ public:
             ImGui::SliderFloat("Path speed", &m_pathSpeed, 0.0f, 0.3f, "%.3f");
             ImGui::Checkbox("Chase camera", &m_chaseCam);
             ImGui::SliderFloat("Probe scale", &m_probeScale, 0.02f, 0.6f, "%.3f");
+            ImGui::Checkbox("Environment reflections", &m_useEnvMap);
             ImGui::End();
 
             glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
@@ -170,26 +191,62 @@ public:
                 m_viewMatrix = glm::lookAt(camPos, camTarget, up);
             }
 
+            // skybox first (after you set m_viewMatrix)
+            glm::mat4 viewNoTrans = m_viewMatrix;
+            viewNoTrans[3] = glm::vec4(0,0,0,1);
+            m_sky->draw(m_skyShader, m_projectionMatrix, viewNoTrans);
+
+            // bind cubemap to unit 1 for the rest of the frame
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, m_sky->cubemap());
+
+            // cache camera world position for reflections
+            glm::mat4 invV = glm::inverse(m_viewMatrix);
+            glm::vec3 camPos = glm::vec3(invV[3]);
+
+
             m_probeRoot->update();   // propagate world = parent * local
 
             if (!m_meshes.empty()) {
                 m_probeRoot->traverse([&](const glm::mat4& M) {
-                    m_defaultShader.bind();
-                    glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
-                    glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
-                    glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
-                    glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
-                    glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), GL_FALSE);
-                    glUniform1i(m_defaultShader.getUniformLocation("useMaterial"), GL_TRUE);
-                    m_meshes.front().draw(m_defaultShader);
-                });
+                m_defaultShader.bind();
+
+                // matrices
+                glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
+                glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
+                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(M));
+
+                // env mapping
+                glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
+                glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);   // sampler uses texture unit 1
+                glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
+
+                // your existing material toggles
+                glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), GL_FALSE);
+                glUniform1i(m_defaultShader.getUniformLocation("useMaterial"), GL_TRUE);
+
+                m_meshes.front().draw(m_defaultShader);
+            });
+
             }
 
 
             for (GPUMesh& mesh : m_meshes) {
                 m_defaultShader.bind();
-                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvpMatrix));
-                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(normalModelMatrix));
+
+                const glm::mat4 M = m_modelMatrix;
+                const glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
+                const glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
+                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(M));
+
+                glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
+                glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);   // texture unit 1 already bound
+                glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
+
                 if (mesh.hasTextureCoords()) {
                     if (m_texture) {
                         m_texture->bind(GL_TEXTURE0);
@@ -201,6 +258,7 @@ public:
                     glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), GL_FALSE);
                     glUniform1i(m_defaultShader.getUniformLocation("useMaterial"), m_useMaterial);
                 }
+
                 mesh.draw(m_defaultShader);
             }
 
@@ -280,6 +338,11 @@ public:
 
         float m_probeScale = 0.12f;
         bool  m_chaseCam   = true;    // toggle chase camera
+
+        std::unique_ptr<Skybox> m_sky;
+        Shader m_skyShader;
+        bool m_useEnvMap = true;   // toggle reflections soon
+
 
 
     };

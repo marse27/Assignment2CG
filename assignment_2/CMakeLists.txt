@@ -16,6 +16,8 @@ add_executable(Master_TechDemo
 		"src/bezier.h"
 		"src/bezier.cpp"
         src/scene_node.h
+		src/skybox.h
+		src/skybox.cpp
 )
 
 target_compile_definitions(Master_TechDemo PRIVATE RESOURCE_ROOT="${CMAKE_CURRENT_LIST_DIR}/")

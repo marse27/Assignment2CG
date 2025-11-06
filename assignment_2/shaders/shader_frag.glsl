@@ -1,29 +1,37 @@
-#version 410
+#version 410 core
 
-layout(std140) uniform Material // Must match the GPUMaterial defined in src/mesh.h
-{
-    vec3 kd;
-	vec3 ks;
-	float shininess;
-	float transparency;
-};
+in vec3 vWorldPos;
+in vec3 vWorldNrm;
+in vec2 vTex;
 
-uniform sampler2D colorMap;
+out vec4 fragColor;
+
+// From your C++ code
 uniform bool hasTexCoords;
-uniform bool useMaterial;
+uniform bool useMaterial;   // kept for compatibility; not used in this minimal version
+uniform sampler2D colorMap;
 
-in vec3 fragPosition;
-in vec3 fragNormal;
-in vec2 fragTexCoord;
+// Environment mapping
+uniform bool useEnvMap;
+uniform samplerCube envMap;
+uniform vec3 camPos;
 
-layout(location = 0) out vec4 fragColor;
+void main() {
+    vec3 baseColor = vec3(1.0);
 
-void main()
-{
-    vec3 normal = normalize(fragNormal);
+    if (hasTexCoords) {
+        baseColor = texture(colorMap, vTex).rgb;
+    }
 
+    vec3 N = normalize(vWorldNrm);
+    vec3 V = normalize(camPos - vWorldPos);
 
-    if (hasTexCoords)       { fragColor = vec4(texture(colorMap, fragTexCoord).rgb, 1);}
-    else if (useMaterial)   { fragColor = vec4(kd, 1);}
-    else                    { fragColor = vec4(normal, 1); } // Output color value, change from (1, 0, 0) to something else
+    vec3 color = baseColor;
+    if (useEnvMap) {
+        vec3 R   = reflect(-V, N);
+        vec3 env = texture(envMap, R).rgb;
+        color = mix(baseColor, env, 0.4);  // cheap reflection mix
+    }
+
+    fragColor = vec4(color, 1.0);
 }
