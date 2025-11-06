@@ -29,8 +29,7 @@ DISABLE_WARNINGS_POP()
 class Application {
 public:
     Application()
-        : m_window("Final Project", glm::ivec2(1024, 1024), OpenGLVersion::GL41)
-    {
+        : m_window("Final Project", glm::ivec2(1024, 1024), OpenGLVersion::GL41) {
         // Register callbacks (no GL calls here)
         m_window.registerKeyCallback([this](int key, int scancode, int action, int mods) {
             if (action == GLFW_PRESS)
@@ -47,11 +46,11 @@ public:
         });
 
         // Initialize GL function pointers now that the GLFW context (created by Window) is current
-        if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+        if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
             std::cerr << "Failed to initialize GLAD - OpenGL function pointers not loaded\n";
             std::terminate();
         }
-        std::cout << "GL initialized: " << (const char*)glGetString(GL_VERSION) << std::endl;
+        std::cout << "GL initialized: " << (const char *) glGetString(GL_VERSION) << std::endl;
 
         // Now safe to create GL-backed resources
         m_texture = std::make_unique<Texture>(RESOURCE_ROOT "resources/checkerboard.png");
@@ -69,19 +68,18 @@ public:
             shadowBuilder.addStage(GL_VERTEX_SHADER, RESOURCE_ROOT "shaders/shadow_vert.glsl");
             shadowBuilder.addStage(GL_FRAGMENT_SHADER, RESOURCE_ROOT "shaders/shadow_frag.glsl");
             m_shadowShader = shadowBuilder.build();
-
         } catch (ShaderLoadingException e) {
             std::cerr << e.what() << std::endl;
         }
 
         // build skybox shader
         ShaderBuilder skyB;
-        skyB.addStage(GL_VERTEX_SHADER,   RESOURCE_ROOT "shaders/skybox_vert.glsl");
+        skyB.addStage(GL_VERTEX_SHADER, RESOURCE_ROOT "shaders/skybox_vert.glsl");
         skyB.addStage(GL_FRAGMENT_SHADER, RESOURCE_ROOT "shaders/skybox_frag.glsl");
         m_skyShader = skyB.build();
 
         // load cubemap faces
-        std::array<std::string,6> faces = {
+        std::array<std::string, 6> faces = {
             RESOURCE_ROOT "resources/sky/mid right.png",
             RESOURCE_ROOT "resources/sky/left.png",
             RESOURCE_ROOT "resources/sky/top.png",
@@ -91,15 +89,14 @@ public:
         };
         m_sky = std::make_unique<Skybox>(faces);
 
-
         // Build the Bezier path segments
         {
             std::vector<CubicBezier> segs;
             const float R = 4.0f, H = 0.5f;
-            segs.push_back({ { R,0,0 }, { R,0, R*0.55f }, {  R*0.55f,0, R }, { 0,0, R } });
-            segs.push_back({ { 0,0, R }, { -R*0.55f,0, R }, { -R,0, R*0.55f }, { -R,0,0 } });
-            segs.push_back({ { -R,0,0 }, { -R,0,-R*0.55f }, { -R*0.55f,0,-R }, { 0,0,-R } });
-            segs.push_back({ { 0,0,-R }, {  R*0.55f,0,-R }, {  R,0,-R*0.55f }, { R,0,0 } });
+            segs.push_back({{R, 0, 0}, {R, 0, R * 0.55f}, {R * 0.55f, 0, R}, {0, 0, R}});
+            segs.push_back({{0, 0, R}, {-R * 0.55f, 0, R}, {-R, 0, R * 0.55f}, {-R, 0, 0}});
+            segs.push_back({{-R, 0, 0}, {-R, 0, -R * 0.55f}, {-R * 0.55f, 0, -R}, {0, 0, -R}});
+            segs.push_back({{0, 0, -R}, {R * 0.55f, 0, -R}, {R, 0, -R * 0.55f}, {R, 0, 0}});
 
             for (size_t i = 0; i < segs.size(); ++i) {
                 segs[i].p1.y += ((i % 2) ? H : -H);
@@ -111,18 +108,19 @@ public:
         // Build probe hierarchy: root -> antenna base -> antenna tip
         m_probeRoot = new SceneNode(); // local set per-frame from Mprobe
         m_probeAntennaBase = m_probeRoot->addChild(new SceneNode());
-        m_probeAntennaTip  = m_probeAntennaBase->addChild(new SceneNode());
+        m_probeAntennaTip = m_probeAntennaBase->addChild(new SceneNode());
 
-        m_texAlbedo   = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/basecolor.png");
-        m_texNormal   = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/normal.png");
-        m_texRoughness= std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/roughness.png");
+        m_texAlbedo = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/basecolor.png");
+        m_texNormal = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/normal.png");
+        m_texRoughness = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/roughness.png");
         m_texMetallic = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/metallic.png");
 
+        buildSunSphere();
+        m_texSun = std::make_unique<Texture>(RESOURCE_ROOT "resources/sun/sunTexture.png");
 
     }
 
-    void update()
-    {
+    void update() {
         int dummyInteger = 0; // Initialized to 0
         while (!m_window.shouldClose()) {
             m_window.updateInput();
@@ -136,9 +134,16 @@ public:
             ImGui::Checkbox("Environment reflections", &m_useEnvMap);
             ImGui::Checkbox("PBR + Normal Map", &m_usePBR);
             ImGui::Text("Camera");
-            ImGui::RadioButton("Chase", &m_camMode, 0); ImGui::SameLine();
-            ImGui::RadioButton("Top",   &m_camMode, 1); ImGui::SameLine();
+            ImGui::RadioButton("Chase", &m_camMode, 0);
+            ImGui::SameLine();
+            ImGui::RadioButton("Top", &m_camMode, 1);
+            ImGui::SameLine();
             ImGui::RadioButton("Orbit", &m_camMode, 2);
+            ImGui::DragFloat3("Sun pos", &m_sunPos.x, 0.05f);
+            ImGui::SliderFloat("Sun radius", &m_sunRadius, 0.2f, 2.0f, "%.2f");
+            ImGui::SliderFloat("Sun intensity", &m_sunIntensity, 0.0f, 40.0f, "%.1f");
+            ImGui::Checkbox("Draw static scene", &m_drawStaticScene);
+
 
             ImGui::End();
 
@@ -160,59 +165,59 @@ public:
 
             // Build a frame from tangent
             glm::vec3 fwd = glm::normalize(probeDir);
-            glm::vec3 up  = glm::vec3(0, 1, 0);
-            if (std::abs(glm::dot(up, fwd)) > 0.98f) up = glm::vec3(0,0,1);
+            glm::vec3 up = glm::vec3(0, 1, 0);
+            if (std::abs(glm::dot(up, fwd)) > 0.98f) up = glm::vec3(0, 0, 1);
             glm::vec3 right = glm::normalize(glm::cross(fwd, up));
             up = glm::normalize(glm::cross(right, fwd));
             glm::mat4 R = glm::mat4(
                 glm::vec4(right, 0),
-                glm::vec4(up,    0),
-                glm::vec4(-fwd,  0),
-                glm::vec4(0,0,0,1)
+                glm::vec4(up, 0),
+                glm::vec4(-fwd, 0),
+                glm::vec4(0, 0, 0, 1)
             );
 
             // Root at path position, scaled
             glm::mat4 Mprobe =
-                glm::translate(glm::mat4(1.0f), probePos) *
-                R *
-                glm::scale(glm::mat4(1.0f), glm::vec3(m_probeScale));
+                    glm::translate(glm::mat4(1.0f), probePos) *
+                    R *
+                    glm::scale(glm::mat4(1.0f), glm::vec3(m_probeScale));
             m_probeRoot->local = Mprobe;
 
             // Animate antenna base: spin around its own Y and offset above the body
-            float tSec = (float)glfwGetTime();
+            float tSec = (float) glfwGetTime();
             glm::mat4 MantennaBase =
-                glm::translate(glm::mat4(1.0f), glm::vec3(0, 2.0f, 0)) *   // lift above body a bit
-                glm::rotate(glm::mat4(1.0f), tSec * 3.0f, glm::vec3(0,1,0)) *
-                glm::scale(glm::mat4(1.0f), glm::vec3(0.4f, 0.4f, 0.4f));
+                    glm::translate(glm::mat4(1.0f), glm::vec3(0, 2.0f, 0)) * // lift above body a bit
+                    glm::rotate(glm::mat4(1.0f), tSec * 3.0f, glm::vec3(0, 1, 0)) *
+                    glm::scale(glm::mat4(1.0f), glm::vec3(0.4f, 0.4f, 0.4f));
             m_probeAntennaBase->local = MantennaBase;
 
             // Antenna tip: bob up/down and rotate
             float bob = 0.25f * std::sin(tSec * 4.0f);
             glm::mat4 MantennaTip =
-                glm::translate(glm::mat4(1.0f), glm::vec3(0, 1.0f + bob, 0)) *
-                glm::rotate(glm::mat4(1.0f), -tSec * 6.0f, glm::vec3(0,0,1)) *
-                glm::scale(glm::mat4(1.0f), glm::vec3(0.25f, 0.25f, 0.25f));
+                    glm::translate(glm::mat4(1.0f), glm::vec3(0, 1.0f + bob, 0)) *
+                    glm::rotate(glm::mat4(1.0f), -tSec * 6.0f, glm::vec3(0, 0, 1)) *
+                    glm::scale(glm::mat4(1.0f), glm::vec3(0.25f, 0.25f, 0.25f));
             m_probeAntennaTip->local = MantennaTip;
 
             // Camera selection
             if (m_camMode == 0) {
                 glm::vec3 camTarget = probePos;
-                glm::vec3 camPos    = probePos - fwd * 2.0f + up * 0.6f;
+                glm::vec3 camPos = probePos - fwd * 2.0f + up * 0.6f;
                 m_viewMatrix = glm::lookAt(camPos, camTarget, up);
             } else if (m_camMode == 1) {
                 glm::vec3 camPos = probePos + glm::vec3(0, 5.0f, 0);
-                m_viewMatrix = glm::lookAt(camPos, probePos, glm::vec3(0,0,-1));
+                m_viewMatrix = glm::lookAt(camPos, probePos, glm::vec3(0, 0, -1));
             } else {
                 m_orbitAngle += dtSec * 0.5f;
-                glm::vec3 camPos = probePos + glm::vec3(std::sin(m_orbitAngle)*3.0f, 1.5f, std::cos(m_orbitAngle)*3.0f);
-                m_viewMatrix = glm::lookAt(camPos, probePos, glm::vec3(0,1,0));
+                glm::vec3 camPos = probePos + glm::vec3(std::sin(m_orbitAngle) * 3.0f, 1.5f,
+                                                        std::cos(m_orbitAngle) * 3.0f);
+                m_viewMatrix = glm::lookAt(camPos, probePos, glm::vec3(0, 1, 0));
             }
-
 
 
             // skybox first (after you set m_viewMatrix)
             glm::mat4 viewNoTrans = m_viewMatrix;
-            viewNoTrans[3] = glm::vec4(0,0,0,1);
+            viewNoTrans[3] = glm::vec4(0, 0, 0, 1);
             m_sky->draw(m_skyShader, m_projectionMatrix, viewNoTrans);
 
             // bind cubemap to unit 1 for the rest of the frame
@@ -224,54 +229,115 @@ public:
             glm::vec3 camPos = glm::vec3(invV[3]);
 
 
-            m_probeRoot->update();   // propagate world = parent * local
+            m_probeRoot->update(); // propagate world = parent * local
 
-            if (!m_meshes.empty()) {
-                m_probeRoot->traverse([&](const glm::mat4& M) {
-            m_defaultShader.bind();
-
-            // matrices
-            glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
-            glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
-            glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
-            glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
-            glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(M));
-
-            // toggles
-            glUniform1i(m_defaultShader.getUniformLocation("usePBR"),    m_usePBR ? 1 : 0);
-            glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
-            glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), 1); // we’re using UVs for PBR maps
-
-            // bind textures to fixed units
-            if (m_texAlbedo)    { m_texAlbedo->bind(GL_TEXTURE0);    glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0); }
-            if (m_texNormal)    { m_texNormal->bind(GL_TEXTURE2);    glUniform1i(m_defaultShader.getUniformLocation("normalMap"), 2); }
-            if (m_texRoughness) { m_texRoughness->bind(GL_TEXTURE3); glUniform1i(m_defaultShader.getUniformLocation("roughMap"), 3); }
-            if (m_texMetallic)  { m_texMetallic->bind(GL_TEXTURE4);  glUniform1i(m_defaultShader.getUniformLocation("metalMap"), 4); }
-
-            // env map already bound to unit 1 earlier this frame (skybox step)
-            glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);
-
-            // camera
-            glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
-
-            m_meshes.front().draw(m_defaultShader);
-        });
+            // Draw the sun sphere (emissive)
+            {
+                m_defaultShader.bind();
+                glUniform3fv(m_defaultShader.getUniformLocation("sunPos"), 1, &m_sunPos[0]);
+                glUniform1f (m_defaultShader.getUniformLocation("sunIntensity"), m_sunIntensity);
+                glUniform1i (m_defaultShader.getUniformLocation("isSun"), 0);
 
 
+                glm::mat4 Msun = glm::translate(glm::mat4(1.0f), m_sunPos)
+                               * glm::scale(glm::mat4(1.0f), glm::vec3(m_sunRadius));
+                glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * Msun;
+                glm::mat3 nrm = glm::inverseTranspose(glm::mat3(Msun));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
+                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(Msun));
+
+                // tell shader this draw is the sun (emissive)
+                glUniform1i(m_defaultShader.getUniformLocation("isSun"), 1);
+                glUniform3fv(m_defaultShader.getUniformLocation("sunEmissive"), 1,
+                             glm::value_ptr(glm::vec3(m_sunIntensity))); // emissive color scaled by intensity
+
+                // base textures
+                if (m_texSun) {
+                    m_texSun->bind(GL_TEXTURE0);
+                    glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0);
+                    glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), 1);
+                } else {
+                    glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), 0);
+                }
+
+                // camera/env (not really needed for emissive but harmless)
+                glUniform1i(m_defaultShader.getUniformLocation("usePBR"),    0);
+                glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), 0);
+                glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
+                glUniform3fv(m_defaultShader.getUniformLocation("sunPos"), 1, &m_sunPos[0]);
+                glUniform1f(m_defaultShader.getUniformLocation("sunIntensity"), m_sunIntensity);
+
+
+                glBindVertexArray(m_sunVAO);
+                glDrawElements(GL_TRIANGLES, m_sunIndexCount, GL_UNSIGNED_INT, nullptr);
+                glBindVertexArray(0);
+
+                // reset flag for next draws
+                glUniform1i(m_defaultShader.getUniformLocation("isSun"), 0);
             }
 
-            for (GPUMesh& mesh : m_meshes) {
+
+            if (!m_meshes.empty()) {
+                m_probeRoot->traverse([&](const glm::mat4 &M) {
+                    m_defaultShader.bind();
+
+                    // matrices
+                    glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
+                    glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
+                    glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE,
+                                       glm::value_ptr(mvp));
+                    glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE,
+                                       glm::value_ptr(nrm));
+                    glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE,
+                                       glm::value_ptr(M));
+
+                    // toggles
+                    glUniform1i(m_defaultShader.getUniformLocation("usePBR"), m_usePBR ? 1 : 0);
+                    glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
+                    glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), 1); // we’re using UVs for PBR maps
+
+                    // bind textures to fixed units
+                    if (m_texAlbedo) {
+                        m_texAlbedo->bind(GL_TEXTURE0);
+                        glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0);
+                    }
+                    if (m_texNormal) {
+                        m_texNormal->bind(GL_TEXTURE2);
+                        glUniform1i(m_defaultShader.getUniformLocation("normalMap"), 2);
+                    }
+                    if (m_texRoughness) {
+                        m_texRoughness->bind(GL_TEXTURE3);
+                        glUniform1i(m_defaultShader.getUniformLocation("roughMap"), 3);
+                    }
+                    if (m_texMetallic) {
+                        m_texMetallic->bind(GL_TEXTURE4);
+                        glUniform1i(m_defaultShader.getUniformLocation("metalMap"), 4);
+                    }
+
+                    // env map already bound to unit 1 earlier this frame (skybox step)
+                    glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);
+
+                    // camera
+                    glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
+
+                    m_meshes.front().draw(m_defaultShader);
+                });
+            }
+
+            for (GPUMesh &mesh: m_meshes) {
                 m_defaultShader.bind();
 
                 const glm::mat4 M = m_modelMatrix;
                 const glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
                 const glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
                 glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
-                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
+                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE,
+                                   glm::value_ptr(nrm));
                 glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(M));
 
                 // toggles
-                glUniform1i(m_defaultShader.getUniformLocation("usePBR"),    m_usePBR ? 1 : 0);
+                glUniform1i(m_defaultShader.getUniformLocation("usePBR"), m_usePBR ? 1 : 0);
                 glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
                 glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), mesh.hasTextureCoords() ? 1 : 0);
 
@@ -280,9 +346,18 @@ public:
                     m_texAlbedo->bind(GL_TEXTURE0);
                     glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0);
                 }
-                if (m_texNormal)    { m_texNormal->bind(GL_TEXTURE2);    glUniform1i(m_defaultShader.getUniformLocation("normalMap"), 2); }
-                if (m_texRoughness) { m_texRoughness->bind(GL_TEXTURE3); glUniform1i(m_defaultShader.getUniformLocation("roughMap"), 3); }
-                if (m_texMetallic)  { m_texMetallic->bind(GL_TEXTURE4);  glUniform1i(m_defaultShader.getUniformLocation("metalMap"), 4); }
+                if (m_texNormal) {
+                    m_texNormal->bind(GL_TEXTURE2);
+                    glUniform1i(m_defaultShader.getUniformLocation("normalMap"), 2);
+                }
+                if (m_texRoughness) {
+                    m_texRoughness->bind(GL_TEXTURE3);
+                    glUniform1i(m_defaultShader.getUniformLocation("roughMap"), 3);
+                }
+                if (m_texMetallic) {
+                    m_texMetallic->bind(GL_TEXTURE4);
+                    glUniform1i(m_defaultShader.getUniformLocation("metalMap"), 4);
+                }
 
                 // env + camera
                 glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);
@@ -298,93 +373,155 @@ public:
                 glDisable(GL_DEPTH_TEST);
                 m_defaultShader.bind();
                 glm::mat4 mvpSpline = m_projectionMatrix * m_viewMatrix * glm::mat4(1.0f);
-                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvpSpline));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE,
+                                   glm::value_ptr(mvpSpline));
                 m_path.drawGL();
                 glEnable(GL_DEPTH_TEST);
             }
 
 
             m_window.swapBuffers();
-
         }
     }
 
-    void onKeyPressed(int key, int mods)
-    {
+    void onKeyPressed(int key, int mods) {
         std::cout << "Key pressed: " << key << std::endl;
     }
 
-    void onKeyReleased(int key, int mods)
-    {
+    void onKeyReleased(int key, int mods) {
         std::cout << "Key released: " << key << std::endl;
     }
 
-    void onMouseMove(const glm::dvec2& cursorPos)
-    {
+    void onMouseMove(const glm::dvec2 &cursorPos) {
         std::cout << "Mouse at position: " << cursorPos.x << " " << cursorPos.y << std::endl;
     }
 
-    void onMouseClicked(int button, int mods)
-    {
+    void onMouseClicked(int button, int mods) {
         std::cout << "Pressed mouse button: " << button << std::endl;
     }
 
-    void onMouseReleased(int button, int mods)
-    {
+    void onMouseReleased(int button, int mods) {
         std::cout << "Released mouse button: " << button << std::endl;
     }
 
-    private:
-        // GL context must exist before GL objects are created.
-        Window m_window;
+    void buildSunSphere(int stacks = 32, int slices = 64) {
+    std::vector<glm::vec3> pos;
+    std::vector<glm::vec3> nrm;
+    std::vector<glm::vec2> uv;
+    std::vector<uint32_t>  idx;
 
-        // Shaders
-        Shader m_defaultShader;
-        Shader m_shadowShader;
+    for (int i = 0; i <= stacks; ++i) {
+        float v = float(i) / stacks;
+        float phi = v * glm::pi<float>();
+        for (int j = 0; j <= slices; ++j) {
+            float u = float(j) / slices;
+            float theta = u * glm::two_pi<float>();
+            glm::vec3 p = glm::vec3(
+                std::sin(phi) * std::cos(theta),
+                std::cos(phi),
+                std::sin(phi) * std::sin(theta)
+            );
+            pos.push_back(p);
+            nrm.push_back(glm::normalize(p));
+            uv.push_back(glm::vec2(u, 1.0f - v));
+        }
+    }
+    auto ix = [slices](int i, int j){ return i*(slices+1) + j; };
+    for (int i = 0; i < stacks; ++i) {
+        for (int j = 0; j < slices; ++j) {
+            int a = ix(i, j);
+            int b = ix(i+1, j);
+            int c = ix(i+1, j+1);
+            int d = ix(i, j+1);
+            idx.push_back(a); idx.push_back(b); idx.push_back(c);
+            idx.push_back(a); idx.push_back(c); idx.push_back(d);
+        }
+    }
 
-        // Resources
-        std::vector<GPUMesh> m_meshes;
-        std::unique_ptr<Texture> m_texture;
-        bool m_useMaterial { true };
+    struct V { glm::vec3 p; glm::vec3 n; glm::vec2 t; };
+    std::vector<V> verts(pos.size());
+    for (size_t i = 0; i < pos.size(); ++i) verts[i] = { pos[i], nrm[i], uv[i] };
 
-        // Matrices
-        glm::mat4 m_projectionMatrix = glm::perspective(glm::radians(80.0f), 1.0f, 0.1f, 30.0f);
-        glm::mat4 m_viewMatrix = glm::lookAt(glm::vec3(-1, 1, -1), glm::vec3(0), glm::vec3(0, 1, 0));
-        glm::mat4 m_modelMatrix { 1.0f };
+    glGenVertexArrays(1, &m_sunVAO);
+    glGenBuffers(1, &m_sunVBO);
+    glGenBuffers(1, &m_sunEBO);
+    glBindVertexArray(m_sunVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_sunVBO);
+    glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(verts.size()*sizeof(V)), verts.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_sunEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(idx.size()*sizeof(uint32_t)), idx.data(), GL_STATIC_DRAW);
 
-        // --- Planet Hop path test --- MUST be after m_window
-        BezierPath m_path{200};
-        bool  m_showPath   = true;
-        float m_pathU      = 0.0f;
-        float m_pathSpeed  = 0.05f;
-        GLuint m_basicLineProgram = 0;
+    glEnableVertexAttribArray(0); // pos
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void*)offsetof(V,p));
+    glEnableVertexAttribArray(1); // nrm
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void*)offsetof(V,n));
+    glEnableVertexAttribArray(2); // uv
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(V), (void*)offsetof(V,t));
 
-        // Probe hierarchy
-        SceneNode* m_probeRoot = nullptr;
-        SceneNode* m_probeAntennaBase = nullptr;
-        SceneNode* m_probeAntennaTip  = nullptr;
-
-        float m_probeScale = 0.12f;
-        bool  m_chaseCam   = true;    // toggle chase camera
-
-        std::unique_ptr<Skybox> m_sky;
-        Shader m_skyShader;
-        bool m_useEnvMap = true;   // toggle reflections soon
-
-        std::unique_ptr<Texture> m_texAlbedo;
-        std::unique_ptr<Texture> m_texNormal;
-        std::unique_ptr<Texture> m_texRoughness;
-        std::unique_ptr<Texture> m_texMetallic;
-        bool m_usePBR = true;
-
-        int m_camMode = 0; // 0=chase, 1=top, 2=orbit
-        float m_orbitAngle = 0.0f;
+    glBindVertexArray(0);
+    m_sunIndexCount = int(idx.size());
+}
 
 
-    };
+private:
+    // GL context must exist before GL objects are created.
+    Window m_window;
 
-int main()
-{
+    // Shaders
+    Shader m_defaultShader;
+    Shader m_shadowShader;
+
+    // Resources
+    std::vector<GPUMesh> m_meshes;
+    std::unique_ptr<Texture> m_texture;
+    bool m_useMaterial{true};
+
+    // Matrices
+    glm::mat4 m_projectionMatrix = glm::perspective(glm::radians(80.0f), 1.0f, 0.1f, 30.0f);
+    glm::mat4 m_viewMatrix = glm::lookAt(glm::vec3(-1, 1, -1), glm::vec3(0), glm::vec3(0, 1, 0));
+    glm::mat4 m_modelMatrix{1.0f};
+
+    // --- Planet Hop path test --- MUST be after m_window
+    BezierPath m_path{200};
+    bool m_showPath = true;
+    float m_pathU = 0.0f;
+    float m_pathSpeed = 0.05f;
+    GLuint m_basicLineProgram = 0;
+
+    // Probe hierarchy
+    SceneNode *m_probeRoot = nullptr;
+    SceneNode *m_probeAntennaBase = nullptr;
+    SceneNode *m_probeAntennaTip = nullptr;
+
+    float m_probeScale = 0.12f;
+    bool m_chaseCam = true; // toggle chase camera
+
+    std::unique_ptr<Skybox> m_sky;
+    Shader m_skyShader;
+    bool m_useEnvMap = true; // toggle reflections soon
+
+    std::unique_ptr<Texture> m_texAlbedo;
+    std::unique_ptr<Texture> m_texNormal;
+    std::unique_ptr<Texture> m_texRoughness;
+    std::unique_ptr<Texture> m_texMetallic;
+    bool m_usePBR = true;
+
+    int m_camMode = 0; // 0=chase, 1=top, 2=orbit
+    float m_orbitAngle = 0.0f;
+
+    // ---- Sun (sphere + light) ----
+    GLuint m_sunVAO = 0, m_sunVBO = 0, m_sunEBO = 0;
+    int m_sunIndexCount = 0;
+    std::unique_ptr<Texture> m_texSun;
+    glm::vec3 m_sunPos = glm::vec3(0.0f, 1.2f, 0.0f);
+    float m_sunRadius = 0.6f;
+    float m_sunIntensity = 12.0f; // lux-ish; tune visually
+    bool m_drawStaticScene = false; // turn off extra dragons if you want just the probe
+};
+
+
+
+int main() {
     Application app;
     app.update();
     return 0;
