@@ -18,6 +18,8 @@ add_executable(Master_TechDemo
         src/scene_node.h
 		src/skybox.h
 		src/skybox.cpp
+        src/free_camera.h
+		src/free_camera.cpp
 )
 
 target_compile_definitions(Master_TechDemo PRIVATE RESOURCE_ROOT="${CMAKE_CURRENT_LIST_DIR}/")

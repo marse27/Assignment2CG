@@ -1,0 +1,72 @@
+
+# JetBrains / CLion
+.idea/
+*.iml
+
+# CMake / build directories
+cmake-build-*/
+build/
+out/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+Makefile
+compile_commands.json
+
+# Object files, libraries, executables
+*.o
+*.obj
+*.lo
+*.la
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+*.exe
+*.out
+
+# Debug / symbols / profiling / coverage
+*.pdb
+*.ilk
+*.idb
+*.ipch
+*.gcda
+*.gcno
+coverage/
+coverage.xml
+
+# Package managers / dependency caches
+.vcpkg/
+.vcpkg_installed/
+buildtree/
+
+# IDE / editor
+.vscode/
+.vs/
+*.suo
+*.user
+*.userprefs
+*.sln
+
+# Temporary files
+*~
+*.swp
+*.swo
+*.tmp
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Tags / cscope
+tags
+cscope.*
+
+# Optional: ignore local config
+local_config.mk
+
+
