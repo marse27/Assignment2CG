@@ -116,8 +116,7 @@ public:
         m_texMetallic = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/metallic.png");
 
         buildSunSphere();
-        m_texSun = std::make_unique<Texture>(RESOURCE_ROOT "resources/sun/sunTexture.png");
-
+        m_texSun = std::make_unique<Texture>(RESOURCE_ROOT "resources/sun/sunTex.jpg");
     }
 
     void update() {
@@ -234,47 +233,54 @@ public:
             // Draw the sun sphere (emissive)
             {
                 m_defaultShader.bind();
+
+                // Mark this draw as "sun" immediately and disable normal mapping.
+                glUniform1i(m_defaultShader.getUniformLocation("isSun"), 1);
+                glUniform1i(m_defaultShader.getUniformLocation("useNormalMap"), 0);
+
+                // Light uniforms used by everything else too
                 glUniform3fv(m_defaultShader.getUniformLocation("sunPos"), 1, &m_sunPos[0]);
-                glUniform1f (m_defaultShader.getUniformLocation("sunIntensity"), m_sunIntensity);
-                glUniform1i (m_defaultShader.getUniformLocation("isSun"), 0);
+                glUniform1f(m_defaultShader.getUniformLocation("sunIntensity"), m_sunIntensity);
 
+                // Emissive color (scale or tint as you like)
+                glm::vec3 sunColor = glm::vec3(m_sunIntensity);
+                glUniform3fv(m_defaultShader.getUniformLocation("sunEmissive"), 1, glm::value_ptr(sunColor));
 
+                // Matrices for the sun sphere
                 glm::mat4 Msun = glm::translate(glm::mat4(1.0f), m_sunPos)
-                               * glm::scale(glm::mat4(1.0f), glm::vec3(m_sunRadius));
+                                 * glm::scale(glm::mat4(1.0f), glm::vec3(m_sunRadius));
                 glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * Msun;
                 glm::mat3 nrm = glm::inverseTranspose(glm::mat3(Msun));
                 glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
-                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
-                glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(Msun));
+                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE,
+                                   glm::value_ptr(nrm));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE,
+                                   glm::value_ptr(Msun));
 
-                // tell shader this draw is the sun (emissive)
-                glUniform1i(m_defaultShader.getUniformLocation("isSun"), 1);
-                glUniform3fv(m_defaultShader.getUniformLocation("sunEmissive"), 1,
-                             glm::value_ptr(glm::vec3(m_sunIntensity))); // emissive color scaled by intensity
-
-                // base textures
+                // Base texture for the sun surface
                 if (m_texSun) {
                     m_texSun->bind(GL_TEXTURE0);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
                     glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0);
                     glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), 1);
                 } else {
                     glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), 0);
                 }
 
-                // camera/env (not really needed for emissive but harmless)
-                glUniform1i(m_defaultShader.getUniformLocation("usePBR"),    0);
+                // No PBR/EnvMap for emissive blob
+                glUniform1i(m_defaultShader.getUniformLocation("usePBR"), 0);
                 glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), 0);
                 glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
-                glUniform3fv(m_defaultShader.getUniformLocation("sunPos"), 1, &m_sunPos[0]);
-                glUniform1f(m_defaultShader.getUniformLocation("sunIntensity"), m_sunIntensity);
-
 
                 glBindVertexArray(m_sunVAO);
                 glDrawElements(GL_TRIANGLES, m_sunIndexCount, GL_UNSIGNED_INT, nullptr);
                 glBindVertexArray(0);
 
-                // reset flag for next draws
+                // Reset for subsequent draws
                 glUniform1i(m_defaultShader.getUniformLocation("isSun"), 0);
+                glUniform1i(m_defaultShader.getUniformLocation("useNormalMap"), 1);
             }
 
 
@@ -363,63 +369,70 @@ public:
     }
 
     void buildSunSphere(int stacks = 32, int slices = 64) {
-    std::vector<glm::vec3> pos;
-    std::vector<glm::vec3> nrm;
-    std::vector<glm::vec2> uv;
-    std::vector<uint32_t>  idx;
+        std::vector<glm::vec3> pos;
+        std::vector<glm::vec3> nrm;
+        std::vector<glm::vec2> uv;
+        std::vector<uint32_t> idx;
 
-    for (int i = 0; i <= stacks; ++i) {
-        float v = float(i) / stacks;
-        float phi = v * glm::pi<float>();
-        for (int j = 0; j <= slices; ++j) {
-            float u = float(j) / slices;
-            float theta = u * glm::two_pi<float>();
-            glm::vec3 p = glm::vec3(
-                std::sin(phi) * std::cos(theta),
-                std::cos(phi),
-                std::sin(phi) * std::sin(theta)
-            );
-            pos.push_back(p);
-            nrm.push_back(glm::normalize(p));
-            uv.push_back(glm::vec2(u, 1.0f - v));
+        for (int i = 0; i <= stacks; ++i) {
+            float v = float(i) / stacks;
+            float phi = v * glm::pi<float>();
+            for (int j = 0; j <= slices; ++j) {
+                float u = float(j) / slices;
+                float theta = u * glm::two_pi<float>();
+                glm::vec3 p = glm::vec3(
+                    std::sin(phi) * std::cos(theta),
+                    std::cos(phi),
+                    std::sin(phi) * std::sin(theta)
+                );
+                pos.push_back(p);
+                nrm.push_back(glm::normalize(p));
+                uv.push_back(glm::vec2(u, 1.0f - v));
+            }
         }
-    }
-    auto ix = [slices](int i, int j){ return i*(slices+1) + j; };
-    for (int i = 0; i < stacks; ++i) {
-        for (int j = 0; j < slices; ++j) {
-            int a = ix(i, j);
-            int b = ix(i+1, j);
-            int c = ix(i+1, j+1);
-            int d = ix(i, j+1);
-            idx.push_back(a); idx.push_back(b); idx.push_back(c);
-            idx.push_back(a); idx.push_back(c); idx.push_back(d);
+        auto ix = [slices](int i, int j) { return i * (slices + 1) + j; };
+        for (int i = 0; i < stacks; ++i) {
+            for (int j = 0; j < slices; ++j) {
+                int a = ix(i, j);
+                int b = ix(i + 1, j);
+                int c = ix(i + 1, j + 1);
+                int d = ix(i, j + 1);
+                idx.push_back(a);
+                idx.push_back(b);
+                idx.push_back(c);
+                idx.push_back(a);
+                idx.push_back(c);
+                idx.push_back(d);
+            }
         }
+
+        struct V {
+            glm::vec3 p;
+            glm::vec3 n;
+            glm::vec2 t;
+        };
+        std::vector<V> verts(pos.size());
+        for (size_t i = 0; i < pos.size(); ++i) verts[i] = {pos[i], nrm[i], uv[i]};
+
+        glGenVertexArrays(1, &m_sunVAO);
+        glGenBuffers(1, &m_sunVBO);
+        glGenBuffers(1, &m_sunEBO);
+        glBindVertexArray(m_sunVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, m_sunVBO);
+        glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(verts.size() * sizeof(V)), verts.data(), GL_STATIC_DRAW);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_sunEBO);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(idx.size() * sizeof(uint32_t)), idx.data(), GL_STATIC_DRAW);
+
+        glEnableVertexAttribArray(0); // pos
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void *) offsetof(V, p));
+        glEnableVertexAttribArray(1); // nrm
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void *) offsetof(V, n));
+        glEnableVertexAttribArray(2); // uv
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(V), (void *) offsetof(V, t));
+
+        glBindVertexArray(0);
+        m_sunIndexCount = int(idx.size());
     }
-
-    struct V { glm::vec3 p; glm::vec3 n; glm::vec2 t; };
-    std::vector<V> verts(pos.size());
-    for (size_t i = 0; i < pos.size(); ++i) verts[i] = { pos[i], nrm[i], uv[i] };
-
-    glGenVertexArrays(1, &m_sunVAO);
-    glGenBuffers(1, &m_sunVBO);
-    glGenBuffers(1, &m_sunEBO);
-    glBindVertexArray(m_sunVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, m_sunVBO);
-    glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(verts.size()*sizeof(V)), verts.data(), GL_STATIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_sunEBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(idx.size()*sizeof(uint32_t)), idx.data(), GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0); // pos
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void*)offsetof(V,p));
-    glEnableVertexAttribArray(1); // nrm
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void*)offsetof(V,n));
-    glEnableVertexAttribArray(2); // uv
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(V), (void*)offsetof(V,t));
-
-    glBindVertexArray(0);
-    m_sunIndexCount = int(idx.size());
-}
-
 
 private:
     // GL context must exist before GL objects are created.
@@ -476,7 +489,6 @@ private:
     float m_sunIntensity = 12.0f; // lux-ish; tune visually
     bool m_drawStaticScene = false; // turn off extra dragons if you want just the probe
 };
-
 
 
 int main() {
