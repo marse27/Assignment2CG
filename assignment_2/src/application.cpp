@@ -325,48 +325,6 @@ public:
                 });
             }
 
-            for (GPUMesh &mesh: m_meshes) {
-                m_defaultShader.bind();
-
-                const glm::mat4 M = m_modelMatrix;
-                const glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
-                const glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
-                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
-                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE,
-                                   glm::value_ptr(nrm));
-                glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(M));
-
-                // toggles
-                glUniform1i(m_defaultShader.getUniformLocation("usePBR"), m_usePBR ? 1 : 0);
-                glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
-                glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), mesh.hasTextureCoords() ? 1 : 0);
-
-                // textures
-                if (mesh.hasTextureCoords() && m_texAlbedo) {
-                    m_texAlbedo->bind(GL_TEXTURE0);
-                    glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0);
-                }
-                if (m_texNormal) {
-                    m_texNormal->bind(GL_TEXTURE2);
-                    glUniform1i(m_defaultShader.getUniformLocation("normalMap"), 2);
-                }
-                if (m_texRoughness) {
-                    m_texRoughness->bind(GL_TEXTURE3);
-                    glUniform1i(m_defaultShader.getUniformLocation("roughMap"), 3);
-                }
-                if (m_texMetallic) {
-                    m_texMetallic->bind(GL_TEXTURE4);
-                    glUniform1i(m_defaultShader.getUniformLocation("metalMap"), 4);
-                }
-
-                // env + camera
-                glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);
-                glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
-
-                mesh.draw(m_defaultShader);
-            }
-
-
             // draw the spline once
             // draw the spline once (avoid z-fighting)
             if (m_showPath) {
