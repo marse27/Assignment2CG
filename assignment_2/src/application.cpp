@@ -113,6 +113,12 @@ public:
         m_probeAntennaBase = m_probeRoot->addChild(new SceneNode());
         m_probeAntennaTip  = m_probeAntennaBase->addChild(new SceneNode());
 
+        m_texAlbedo   = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/basecolor.png");
+        m_texNormal   = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/normal.png");
+        m_texRoughness= std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/roughness.png");
+        m_texMetallic = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/metallic.png");
+
+
     }
 
     void update()
@@ -121,15 +127,19 @@ public:
         while (!m_window.shouldClose()) {
             m_window.updateInput();
 
-            ImGui::Begin("Window");
-            ImGui::InputInt("This is an integer input", &dummyInteger);
-            ImGui::Text("Value is: %i", dummyInteger);
+            ImGui::Begin("Controls");
             ImGui::Checkbox("Use material if no texture", &m_useMaterial);
             ImGui::Checkbox("Show path", &m_showPath);
             ImGui::SliderFloat("Path speed", &m_pathSpeed, 0.0f, 0.3f, "%.3f");
             ImGui::Checkbox("Chase camera", &m_chaseCam);
             ImGui::SliderFloat("Probe scale", &m_probeScale, 0.02f, 0.6f, "%.3f");
             ImGui::Checkbox("Environment reflections", &m_useEnvMap);
+            ImGui::Checkbox("PBR + Normal Map", &m_usePBR);
+            ImGui::Text("Camera");
+            ImGui::RadioButton("Chase", &m_camMode, 0); ImGui::SameLine();
+            ImGui::RadioButton("Top",   &m_camMode, 1); ImGui::SameLine();
+            ImGui::RadioButton("Orbit", &m_camMode, 2);
+
             ImGui::End();
 
             glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
@@ -184,12 +194,21 @@ public:
                 glm::scale(glm::mat4(1.0f), glm::vec3(0.25f, 0.25f, 0.25f));
             m_probeAntennaTip->local = MantennaTip;
 
-            // Optional chase camera
-            if (m_chaseCam) {
+            // Camera selection
+            if (m_camMode == 0) {
                 glm::vec3 camTarget = probePos;
                 glm::vec3 camPos    = probePos - fwd * 2.0f + up * 0.6f;
                 m_viewMatrix = glm::lookAt(camPos, camTarget, up);
+            } else if (m_camMode == 1) {
+                glm::vec3 camPos = probePos + glm::vec3(0, 5.0f, 0);
+                m_viewMatrix = glm::lookAt(camPos, probePos, glm::vec3(0,0,-1));
+            } else {
+                m_orbitAngle += dtSec * 0.5f;
+                glm::vec3 camPos = probePos + glm::vec3(std::sin(m_orbitAngle)*3.0f, 1.5f, std::cos(m_orbitAngle)*3.0f);
+                m_viewMatrix = glm::lookAt(camPos, probePos, glm::vec3(0,1,0));
             }
+
+
 
             // skybox first (after you set m_viewMatrix)
             glm::mat4 viewNoTrans = m_viewMatrix;
@@ -209,29 +228,37 @@ public:
 
             if (!m_meshes.empty()) {
                 m_probeRoot->traverse([&](const glm::mat4& M) {
-                m_defaultShader.bind();
+            m_defaultShader.bind();
 
-                // matrices
-                glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
-                glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
-                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
-                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
-                glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(M));
+            // matrices
+            glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
+            glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
+            glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
+            glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
+            glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(M));
 
-                // env mapping
-                glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
-                glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);   // sampler uses texture unit 1
-                glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
+            // toggles
+            glUniform1i(m_defaultShader.getUniformLocation("usePBR"),    m_usePBR ? 1 : 0);
+            glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
+            glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), 1); // we’re using UVs for PBR maps
 
-                // your existing material toggles
-                glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), GL_FALSE);
-                glUniform1i(m_defaultShader.getUniformLocation("useMaterial"), GL_TRUE);
+            // bind textures to fixed units
+            if (m_texAlbedo)    { m_texAlbedo->bind(GL_TEXTURE0);    glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0); }
+            if (m_texNormal)    { m_texNormal->bind(GL_TEXTURE2);    glUniform1i(m_defaultShader.getUniformLocation("normalMap"), 2); }
+            if (m_texRoughness) { m_texRoughness->bind(GL_TEXTURE3); glUniform1i(m_defaultShader.getUniformLocation("roughMap"), 3); }
+            if (m_texMetallic)  { m_texMetallic->bind(GL_TEXTURE4);  glUniform1i(m_defaultShader.getUniformLocation("metalMap"), 4); }
 
-                m_meshes.front().draw(m_defaultShader);
-            });
+            // env map already bound to unit 1 earlier this frame (skybox step)
+            glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);
+
+            // camera
+            glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
+
+            m_meshes.front().draw(m_defaultShader);
+        });
+
 
             }
-
 
             for (GPUMesh& mesh : m_meshes) {
                 m_defaultShader.bind();
@@ -243,25 +270,26 @@ public:
                 glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
                 glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(M));
 
+                // toggles
+                glUniform1i(m_defaultShader.getUniformLocation("usePBR"),    m_usePBR ? 1 : 0);
                 glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
-                glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);   // texture unit 1 already bound
-                glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
+                glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), mesh.hasTextureCoords() ? 1 : 0);
 
-                if (mesh.hasTextureCoords()) {
-                    if (m_texture) {
-                        m_texture->bind(GL_TEXTURE0);
-                        glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0);
-                    }
-                    glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), GL_TRUE);
-                    glUniform1i(m_defaultShader.getUniformLocation("useMaterial"), GL_FALSE);
-                } else {
-                    glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), GL_FALSE);
-                    glUniform1i(m_defaultShader.getUniformLocation("useMaterial"), m_useMaterial);
+                // textures
+                if (mesh.hasTextureCoords() && m_texAlbedo) {
+                    m_texAlbedo->bind(GL_TEXTURE0);
+                    glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0);
                 }
+                if (m_texNormal)    { m_texNormal->bind(GL_TEXTURE2);    glUniform1i(m_defaultShader.getUniformLocation("normalMap"), 2); }
+                if (m_texRoughness) { m_texRoughness->bind(GL_TEXTURE3); glUniform1i(m_defaultShader.getUniformLocation("roughMap"), 3); }
+                if (m_texMetallic)  { m_texMetallic->bind(GL_TEXTURE4);  glUniform1i(m_defaultShader.getUniformLocation("metalMap"), 4); }
+
+                // env + camera
+                glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);
+                glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
 
                 mesh.draw(m_defaultShader);
             }
-
 
 
             // draw the spline once
@@ -343,6 +371,14 @@ public:
         Shader m_skyShader;
         bool m_useEnvMap = true;   // toggle reflections soon
 
+        std::unique_ptr<Texture> m_texAlbedo;
+        std::unique_ptr<Texture> m_texNormal;
+        std::unique_ptr<Texture> m_texRoughness;
+        std::unique_ptr<Texture> m_texMetallic;
+        bool m_usePBR = true;
+
+        int m_camMode = 0; // 0=chase, 1=top, 2=orbit
+        float m_orbitAngle = 0.0f;
 
 
     };
