@@ -22,9 +22,9 @@ DISABLE_WARNINGS_POP()
 #include <iostream>
 #include <vector>
 #include <memory>
+#include <cassert>
 #include "scene_node.h"
 #include "skybox.h"
-
 
 class Application {
 public:
@@ -89,7 +89,7 @@ public:
         };
         m_sky = std::make_unique<Skybox>(faces);
 
-        // Build the Bezier path segments
+        // Inner Bezier path (camera target dragon)
         {
             std::vector<CubicBezier> segs;
             const float R = 4.0f, H = 0.5f;
@@ -97,7 +97,6 @@ public:
             segs.push_back({{0, 0, R}, {-R * 0.55f, 0, R}, {-R, 0, R * 0.55f}, {-R, 0, 0}});
             segs.push_back({{-R, 0, 0}, {-R, 0, -R * 0.55f}, {-R * 0.55f, 0, -R}, {0, 0, -R}});
             segs.push_back({{0, 0, -R}, {R * 0.55f, 0, -R}, {R, 0, -R * 0.55f}, {R, 0, 0}});
-
             for (size_t i = 0; i < segs.size(); ++i) {
                 segs[i].p1.y += ((i % 2) ? H : -H);
                 segs[i].p2.y += ((i % 2) ? -H : H);
@@ -105,22 +104,40 @@ public:
             m_path.setSegments(segs);
         }
 
-        // Build probe hierarchy: root -> antenna base -> antenna tip
-        m_probeRoot = new SceneNode(); // local set per-frame from Mprobe
-        m_probeAntennaBase = m_probeRoot->addChild(new SceneNode());
-        m_probeAntennaTip = m_probeAntennaBase->addChild(new SceneNode());
+        // Scene graph: inner root and escort root
+        m_probeRoot   = new SceneNode();      // single dragon on inner path
+        m_escortRoot  = new SceneNode();      // two stacked dragons on outer path
+        m_probeAntennaBase = m_escortRoot->addChild(new SceneNode());  // first stacked dragon
+        m_probeAntennaTip  = m_probeAntennaBase->addChild(new SceneNode()); // second stacked dragon above it
 
-        m_texAlbedo = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/basecolor.png");
-        m_texNormal = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/normal.png");
-        m_texRoughness = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/roughness.png");
+        // Outer Bezier path (larger radius)
+        {
+            std::vector<CubicBezier> segs;
+            const float R = m_pathOuterRadius, H = 0.6f;
+            segs.push_back({{R, 0, 0}, {R, 0, R * 0.55f}, {R * 0.55f, 0, R}, {0, 0, R}});
+            segs.push_back({{0, 0, R}, {-R * 0.55f, 0, R}, {-R, 0, R * 0.55f}, {-R, 0, 0}});
+            segs.push_back({{-R, 0, 0}, {-R, 0, -R * 0.55f}, {-R * 0.55f, 0, -R}, {0, 0, -R}});
+            segs.push_back({{0, 0, -R}, {R * 0.55f, 0, -R}, {R, 0, -R * 0.55f}, {R, 0, 0}});
+            for (size_t i = 0; i < segs.size(); ++i) {
+                segs[i].p1.y += ((i % 2) ? H : -H);
+                segs[i].p2.y += ((i % 2) ? -H : H);
+            }
+            m_pathOuter.setSegments(segs);
+        }
+
+        m_texAlbedo   = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/basecolor.png");
+        m_texNormal   = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/normal.png");
+        m_texRoughness= std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/roughness.png");
         m_texMetallic = std::make_unique<Texture>(RESOURCE_ROOT "resources/spaceship/metallic.png");
 
         buildSunSphere();
         m_texSun = std::make_unique<Texture>(RESOURCE_ROOT "resources/sun/sunTex.jpg");
+
+        // sanity
+        assert(m_probeRoot && m_escortRoot && m_probeAntennaBase && m_probeAntennaTip);
     }
 
     void update() {
-        int dummyInteger = 0; // Initialized to 0
         while (!m_window.shouldClose()) {
             m_window.updateInput();
 
@@ -142,29 +159,25 @@ public:
             ImGui::SliderFloat("Sun radius", &m_sunRadius, 0.2f, 2.0f, "%.2f");
             ImGui::SliderFloat("Sun intensity", &m_sunIntensity, 0.0f, 40.0f, "%.1f");
             ImGui::Checkbox("Draw static scene", &m_drawStaticScene);
-
-
             ImGui::End();
 
             glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
             glEnable(GL_DEPTH_TEST);
 
-            const glm::mat4 mvpMatrix = m_projectionMatrix * m_viewMatrix * m_modelMatrix;
-            const glm::mat3 normalModelMatrix = glm::inverseTranspose(glm::mat3(m_modelMatrix));
-
             static double last = glfwGetTime();
             double now = glfwGetTime();
             float dtSec = float(now - last);
             last = now;
 
+            // Advance inner path
             m_pathU = std::fmod(m_pathU + dtSec * m_pathSpeed, 1.0f);
             glm::vec3 probePos = m_path.sample(m_pathU);
             glm::vec3 probeDir = glm::normalize(m_path.tangentAt(m_pathU));
 
-            // Build a frame from tangent
+            // Frame from tangent (inner)
             glm::vec3 fwd = glm::normalize(probeDir);
-            glm::vec3 up = glm::vec3(0, 1, 0);
+            glm::vec3 up  = glm::vec3(0, 1, 0);
             if (std::abs(glm::dot(up, fwd)) > 0.98f) up = glm::vec3(0, 0, 1);
             glm::vec3 right = glm::normalize(glm::cross(fwd, up));
             up = glm::normalize(glm::cross(right, fwd));
@@ -175,28 +188,42 @@ public:
                 glm::vec4(0, 0, 0, 1)
             );
 
-            // Root at path position, scaled
+            // Place inner root
             glm::mat4 Mprobe =
-                    glm::translate(glm::mat4(1.0f), probePos) *
-                    R *
-                    glm::scale(glm::mat4(1.0f), glm::vec3(m_probeScale));
+                glm::translate(glm::mat4(1.0f), probePos) *
+                R *
+                glm::scale(glm::mat4(1.0f), glm::vec3(m_probeScale));
             m_probeRoot->local = Mprobe;
 
-            // Animate antenna base: spin around its own Y and offset above the body
-            float tSec = (float) glfwGetTime();
-            glm::mat4 MantennaBase =
-                    glm::translate(glm::mat4(1.0f), glm::vec3(0, 2.0f, 0)) * // lift above body a bit
-                    glm::rotate(glm::mat4(1.0f), tSec * 3.0f, glm::vec3(0, 1, 0)) *
-                    glm::scale(glm::mat4(1.0f), glm::vec3(0.4f, 0.4f, 0.4f));
-            m_probeAntennaBase->local = MantennaBase;
+            // Advance outer path
+            m_pathOuterU = std::fmod(m_pathOuterU + dtSec * m_pathOuterSpeed, 1.0f);
+            glm::vec3 outerPos = m_pathOuter.sample(m_pathOuterU);
+            glm::vec3 outerDir = glm::normalize(m_pathOuter.tangentAt(m_pathOuterU));
 
-            // Antenna tip: bob up/down and rotate
-            float bob = 0.25f * std::sin(tSec * 4.0f);
-            glm::mat4 MantennaTip =
-                    glm::translate(glm::mat4(1.0f), glm::vec3(0, 1.0f + bob, 0)) *
-                    glm::rotate(glm::mat4(1.0f), -tSec * 6.0f, glm::vec3(0, 0, 1)) *
-                    glm::scale(glm::mat4(1.0f), glm::vec3(0.25f, 0.25f, 0.25f));
-            m_probeAntennaTip->local = MantennaTip;
+            // Frame from tangent (outer)
+            glm::vec3 ofwd = glm::normalize(outerDir);
+            glm::vec3 oup  = glm::vec3(0, 1, 0);
+            if (std::abs(glm::dot(oup, ofwd)) > 0.98f) oup = glm::vec3(0, 0, 1);
+            glm::vec3 oright = glm::normalize(glm::cross(ofwd, oup));
+            oup = glm::normalize(glm::cross(oright, ofwd));
+            glm::mat4 oR = glm::mat4(
+                glm::vec4(oright, 0),
+                glm::vec4(oup, 0),
+                glm::vec4(-ofwd, 0),
+                glm::vec4(0, 0, 0, 1)
+            );
+
+            // Place escort root at larger radius
+            glm::mat4 Mescort =
+                glm::translate(glm::mat4(1.0f), outerPos) *
+                oR *
+                glm::scale(glm::mat4(1.0f), glm::vec3(m_probeScale));
+            m_escortRoot->local = Mescort;
+
+            // Keep the stacked one above the other (base at root, tip above with a small bob)
+            float bob = 0.25f * std::sin(float(glfwGetTime()) * 4.0f);
+            m_probeAntennaBase->local = glm::mat4(1.0f);
+            m_probeAntennaTip->local  = glm::translate(glm::mat4(1.0f), glm::vec3(0, 1.0f + bob, 0));
 
             // Camera selection
             if (m_camMode == 0) {
@@ -213,7 +240,6 @@ public:
                 m_viewMatrix = glm::lookAt(camPos, probePos, glm::vec3(0, 1, 0));
             }
 
-
             // skybox first (after you set m_viewMatrix)
             glm::mat4 viewNoTrans = m_viewMatrix;
             viewNoTrans[3] = glm::vec4(0, 0, 0, 1);
@@ -227,42 +253,39 @@ public:
             glm::mat4 invV = glm::inverse(m_viewMatrix);
             glm::vec3 camPos = glm::vec3(invV[3]);
 
-
-            m_probeRoot->update(); // propagate world = parent * local
+            // Propagate transforms
+            m_probeRoot->update();
+            m_escortRoot->update();
 
             // Draw the sun sphere (emissive)
             {
                 m_defaultShader.bind();
 
-                // Mark this draw as "sun" immediately and disable normal mapping.
+                // Mark this draw as "sun" immediately
                 glUniform1i(m_defaultShader.getUniformLocation("isSun"), 1);
-                glUniform1i(m_defaultShader.getUniformLocation("useNormalMap"), 0);
 
-                // Light uniforms used by everything else too
+                // Light uniforms
                 glUniform3fv(m_defaultShader.getUniformLocation("sunPos"), 1, &m_sunPos[0]);
-                glUniform1f(m_defaultShader.getUniformLocation("sunIntensity"), m_sunIntensity);
+                glUniform1f (m_defaultShader.getUniformLocation("sunIntensity"), m_sunIntensity);
 
-                // Emissive color (scale or tint as you like)
+                // Emissive color
                 glm::vec3 sunColor = glm::vec3(m_sunIntensity);
                 glUniform3fv(m_defaultShader.getUniformLocation("sunEmissive"), 1, glm::value_ptr(sunColor));
 
                 // Matrices for the sun sphere
                 glm::mat4 Msun = glm::translate(glm::mat4(1.0f), m_sunPos)
-                                 * glm::scale(glm::mat4(1.0f), glm::vec3(m_sunRadius));
+                               * glm::scale(glm::mat4(1.0f), glm::vec3(m_sunRadius));
                 glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * Msun;
                 glm::mat3 nrm = glm::inverseTranspose(glm::mat3(Msun));
                 glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
-                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE,
-                                   glm::value_ptr(nrm));
-                glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE,
-                                   glm::value_ptr(Msun));
+                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(Msun));
 
                 // Base texture for the sun surface
                 if (m_texSun) {
                     m_texSun->bind(GL_TEXTURE0);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
                     glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0);
                     glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), 1);
                 } else {
@@ -280,69 +303,65 @@ public:
 
                 // Reset for subsequent draws
                 glUniform1i(m_defaultShader.getUniformLocation("isSun"), 0);
-                glUniform1i(m_defaultShader.getUniformLocation("useNormalMap"), 1);
             }
 
+            // Draw single dragon on INNER path (root only)
+            {
+                m_defaultShader.bind();
+                const glm::mat4 &M = m_probeRoot->world;
+                glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
+                glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
+                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(M));
 
-            if (!m_meshes.empty()) {
-                m_probeRoot->traverse([&](const glm::mat4 &M) {
-                    m_defaultShader.bind();
+                glUniform1i(m_defaultShader.getUniformLocation("usePBR"), m_usePBR ? 1 : 0);
+                glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
+                glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), 1);
 
-                    // matrices
-                    glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
-                    glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
-                    glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE,
-                                       glm::value_ptr(mvp));
-                    glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE,
-                                       glm::value_ptr(nrm));
-                    glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE,
-                                       glm::value_ptr(M));
+                if (m_texAlbedo)   { m_texAlbedo->bind(GL_TEXTURE0);   glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0); }
+                if (m_texNormal)   { m_texNormal->bind(GL_TEXTURE2);   glUniform1i(m_defaultShader.getUniformLocation("normalMap"), 2); }
+                if (m_texRoughness){ m_texRoughness->bind(GL_TEXTURE3); glUniform1i(m_defaultShader.getUniformLocation("roughMap"), 3); }
+                if (m_texMetallic) { m_texMetallic->bind(GL_TEXTURE4); glUniform1i(m_defaultShader.getUniformLocation("metalMap"), 4); }
+                glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);
+                glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
 
-                    // toggles
-                    glUniform1i(m_defaultShader.getUniformLocation("usePBR"), m_usePBR ? 1 : 0);
-                    glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
-                    glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), 1); // we’re using UVs for PBR maps
-
-                    // bind textures to fixed units
-                    if (m_texAlbedo) {
-                        m_texAlbedo->bind(GL_TEXTURE0);
-                        glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0);
-                    }
-                    if (m_texNormal) {
-                        m_texNormal->bind(GL_TEXTURE2);
-                        glUniform1i(m_defaultShader.getUniformLocation("normalMap"), 2);
-                    }
-                    if (m_texRoughness) {
-                        m_texRoughness->bind(GL_TEXTURE3);
-                        glUniform1i(m_defaultShader.getUniformLocation("roughMap"), 3);
-                    }
-                    if (m_texMetallic) {
-                        m_texMetallic->bind(GL_TEXTURE4);
-                        glUniform1i(m_defaultShader.getUniformLocation("metalMap"), 4);
-                    }
-
-                    // env map already bound to unit 1 earlier this frame (skybox step)
-                    glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);
-
-                    // camera
-                    glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
-
-                    m_meshes.front().draw(m_defaultShader);
-                });
+                m_meshes.front().draw(m_defaultShader);
             }
 
-            // draw the spline once
-            // draw the spline once (avoid z-fighting)
+            // Draw the two stacked dragons on the OUTER path (traverse escort hierarchy)
+            m_escortRoot->traverse([&](const glm::mat4 &M) {
+                m_defaultShader.bind();
+                glm::mat4 mvp = m_projectionMatrix * m_viewMatrix * M;
+                glm::mat3 nrm = glm::inverseTranspose(glm::mat3(M));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvp));
+                glUniformMatrix3fv(m_defaultShader.getUniformLocation("normalModelMatrix"), 1, GL_FALSE, glm::value_ptr(nrm));
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("modelMatrix"), 1, GL_FALSE, glm::value_ptr(M));
+
+                glUniform1i(m_defaultShader.getUniformLocation("usePBR"), m_usePBR ? 1 : 0);
+                glUniform1i(m_defaultShader.getUniformLocation("useEnvMap"), m_useEnvMap ? 1 : 0);
+                glUniform1i(m_defaultShader.getUniformLocation("hasTexCoords"), 1);
+
+                if (m_texAlbedo)   { m_texAlbedo->bind(GL_TEXTURE0);   glUniform1i(m_defaultShader.getUniformLocation("colorMap"), 0); }
+                if (m_texNormal)   { m_texNormal->bind(GL_TEXTURE2);   glUniform1i(m_defaultShader.getUniformLocation("normalMap"), 2); }
+                if (m_texRoughness){ m_texRoughness->bind(GL_TEXTURE3); glUniform1i(m_defaultShader.getUniformLocation("roughMap"), 3); }
+                if (m_texMetallic) { m_texMetallic->bind(GL_TEXTURE4); glUniform1i(m_defaultShader.getUniformLocation("metalMap"), 4); }
+                glUniform1i(m_defaultShader.getUniformLocation("envMap"), 1);
+                glUniform3fv(m_defaultShader.getUniformLocation("camPos"), 1, &camPos[0]);
+
+                m_meshes.front().draw(m_defaultShader);
+            });
+
+            // draw the splines (avoid z-fighting)
             if (m_showPath) {
                 glDisable(GL_DEPTH_TEST);
                 m_defaultShader.bind();
                 glm::mat4 mvpSpline = m_projectionMatrix * m_viewMatrix * glm::mat4(1.0f);
-                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE,
-                                   glm::value_ptr(mvpSpline));
-                m_path.drawGL();
+                glUniformMatrix4fv(m_defaultShader.getUniformLocation("mvpMatrix"), 1, GL_FALSE, glm::value_ptr(mvpSpline));
+                m_path.drawGL();       // inner
+                m_pathOuter.drawGL();  // outer
                 glEnable(GL_DEPTH_TEST);
             }
-
 
             m_window.swapBuffers();
         }
@@ -424,11 +443,11 @@ public:
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(idx.size() * sizeof(uint32_t)), idx.data(), GL_STATIC_DRAW);
 
         glEnableVertexAttribArray(0); // pos
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void *) offsetof(V, p));
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void*)offsetof(V, p));
         glEnableVertexAttribArray(1); // nrm
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void *) offsetof(V, n));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(V), (void*)offsetof(V, n));
         glEnableVertexAttribArray(2); // uv
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(V), (void *) offsetof(V, t));
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(V), (void*)offsetof(V, t));
 
         glBindVertexArray(0);
         m_sunIndexCount = int(idx.size());
@@ -452,44 +471,50 @@ private:
     glm::mat4 m_viewMatrix = glm::lookAt(glm::vec3(-1, 1, -1), glm::vec3(0), glm::vec3(0, 1, 0));
     glm::mat4 m_modelMatrix{1.0f};
 
-    // --- Planet Hop path test --- MUST be after m_window
+    // --- Inner path (camera target) ---
     BezierPath m_path{200};
-    bool m_showPath = true;
-    float m_pathU = 0.0f;
-    float m_pathSpeed = 0.05f;
+    bool  m_showPath   = true;
+    float m_pathU      = 0.0f;
+    float m_pathSpeed  = 0.05f;
     GLuint m_basicLineProgram = 0;
 
-    // Probe hierarchy
-    SceneNode *m_probeRoot = nullptr;
-    SceneNode *m_probeAntennaBase = nullptr;
-    SceneNode *m_probeAntennaTip = nullptr;
+    // Scene graph
+    SceneNode *m_probeRoot = nullptr;          // inner single dragon
+    SceneNode *m_probeAntennaBase = nullptr;   // first outer dragon (child of escort root)
+    SceneNode *m_probeAntennaTip  = nullptr;   // second outer dragon (child of base)
+    SceneNode *m_escortRoot = nullptr;         // parent for the two stacked dragons (outer)
 
     float m_probeScale = 0.12f;
-    bool m_chaseCam = true; // toggle chase camera
+    bool  m_chaseCam   = true;
 
     std::unique_ptr<Skybox> m_sky;
     Shader m_skyShader;
-    bool m_useEnvMap = true; // toggle reflections soon
+    bool   m_useEnvMap = true;
 
     std::unique_ptr<Texture> m_texAlbedo;
     std::unique_ptr<Texture> m_texNormal;
     std::unique_ptr<Texture> m_texRoughness;
     std::unique_ptr<Texture> m_texMetallic;
-    bool m_usePBR = true;
+    bool   m_usePBR = true;
 
-    int m_camMode = 0; // 0=chase, 1=top, 2=orbit
+    int   m_camMode    = 0; // 0=chase, 1=top, 2=orbit
     float m_orbitAngle = 0.0f;
 
     // ---- Sun (sphere + light) ----
     GLuint m_sunVAO = 0, m_sunVBO = 0, m_sunEBO = 0;
-    int m_sunIndexCount = 0;
+    int    m_sunIndexCount = 0;
     std::unique_ptr<Texture> m_texSun;
     glm::vec3 m_sunPos = glm::vec3(0.0f, 1.2f, 0.0f);
-    float m_sunRadius = 0.6f;
-    float m_sunIntensity = 12.0f; // lux-ish; tune visually
-    bool m_drawStaticScene = false; // turn off extra dragons if you want just the probe
-};
+    float     m_sunRadius = 0.6f;
+    float     m_sunIntensity = 12.0f;
+    bool      m_drawStaticScene = false;
 
+    // --- Outer path for the two stacked dragons ---
+    BezierPath m_pathOuter{200};
+    float m_pathOuterU      = 0.0f;
+    float m_pathOuterSpeed  = 0.035f;
+    float m_pathOuterRadius = 7.0f;
+};
 
 int main() {
     Application app;
